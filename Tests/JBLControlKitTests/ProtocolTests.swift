@@ -43,6 +43,19 @@ let flip7 = Catalog.model(0x2107)!
     ])
 }
 
+// Captured from a Charge 4 (firmware 3.4.0.0): every token packed into one 0x12 frame (MAC replaced).
+@Test func packedInfoTokensParse() throws {
+    var d = FrameDecoder()
+    let frame = try #require(d.feed(bytes("""
+    AA 12 21 00 C1 0C 4A 42 4C 20 43 68 61 72 67 65 20 34 42 1F 29 43 11 44 64 46 00 47 01 48 00 11 22 33 44 55
+    """)).first)
+    #expect(InfoToken.parseAll(frame.payload) == [
+        .name("JBL Charge 4"), .productID(0x1F29), .color(0x11), .battery(level: 100, charging: false),
+        .audioChannel(0x00), .audioSourceConnected(true), .other(token: 0x48, value: [0x00, 0x11, 0x22, 0x33, 0x44, 0x55]),
+    ])
+    #expect(Catalog.model(0x1F29)?.name == "JBL Charge 4")
+}
+
 @Test func advancedEQReplyParses() throws {
     var d = FrameDecoder()
     let frame = try #require(d.feed(bytes(flip7EQReply)).first)

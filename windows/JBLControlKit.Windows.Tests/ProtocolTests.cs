@@ -48,6 +48,25 @@ public class ProtocolTests
         }, tokens);
     }
 
+    // Captured from a Charge 4 (firmware 3.4.0.0): every token packed into one 0x12 frame (MAC replaced).
+    [Fact]
+    public void PackedInfoTokensParse()
+    {
+        var frame = new FrameDecoder().Feed(Bytes(
+            "AA 12 21 00 C1 0C 4A 42 4C 20 43 68 61 72 67 65 20 34 42 1F 29 43 11 44 64 46 00 47 01 48 00 11 22 33 44 55")).Single();
+        Assert.Equal(new InfoToken[]
+        {
+            new InfoToken.Name("JBL Charge 4"),
+            new InfoToken.ProductId(0x1F29),
+            new InfoToken.Color(0x11),
+            new InfoToken.Battery(100, false),
+            new InfoToken.AudioChannel(0x00),
+            new InfoToken.AudioSourceConnected(true),
+            new InfoToken.Other(0x48, Bytes("00 11 22 33 44 55")),
+        }, InfoToken.ParseAll(frame.Payload));
+        Assert.Equal("JBL Charge 4", Catalog.Model(0x1F29)?.Name);
+    }
+
     [Fact]
     public void AdvancedEqReplyParses()
     {

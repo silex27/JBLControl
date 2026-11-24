@@ -140,7 +140,7 @@ public sealed class FrameDecoder
 // MARK: - Speaker info (0x12 tokens)
 
 /// <summary>
-/// One <c>0x12</c> notification carries one token: <c>00 | token | value</c>.
+/// A <c>0x12</c> notification carries one token, <c>00 | token | value</c>, or on older speakers several in a row.
 /// Tokens with the high bit set carry a length-prefixed UTF-8 string.
 /// </summary>
 public abstract record InfoToken
@@ -175,33 +175,55 @@ public abstract record InfoToken
         }
     }
 
-    public static InfoToken? Parse(byte[] payload)
+    public static InfoToken? Parse(byte[] payload) => ParseAll(payload).FirstOrDefault();
+
+    /// <summary>Widths of fixed-size tokens, needed to walk packed payloads (Charge 4).</summary>
+    private static int? FixedWidth(byte token) => token switch
     {
-        if (payload.Length < 2) return null;
-        byte token = payload[1];
-        byte[] value = payload[2..];
-        if ((token & 0x80) != 0 && value.Length > 0)
+        0x42 => 2,
+        0x43 or 0x44 or 0x46 or 0x47 => 1,
+        0x48 => 6, // the speaker's MAC address
+        _ => null,
+    };
+
+    /// <summary>A token of unknown width takes the rest of the payload, so single-token frames parse as before.</summary>
+    public static List<InfoToken> ParseAll(byte[] payload)
+    {
+        var tokens = new List<InfoToken>();
+        int i = 1;
+        while (i < payload.Length)
         {
-            int length = value[0];
-            var text = value[1..].Take(length).ToArray();
-            string s = Encoding.UTF8.GetString(text);
-            return token switch
+            byte token = payload[i++];
+            byte[] rest = payload[i..];
+            if ((token & 0x80) != 0 && rest.Length > 0)
             {
-                0xC1 => new Name(s),
-                0xC2 => new Serial(s),
-                _ => new Other(token, text),
-            };
+                int length = rest[0];
+                var text = rest[1..].Take(length).ToArray();
+                i += 1 + text.Length;
+                string s = Encoding.UTF8.GetString(text);
+                tokens.Add(token switch
+                {
+                    0xC1 => new Name(s),
+                    0xC2 => new Serial(s),
+                    _ => new Other(token, text),
+                });
+                continue;
+            }
+            int width = FixedWidth(token) is { } w && rest.Length > w ? w : rest.Length;
+            byte[] value = rest[..width];
+            i += width;
+            tokens.Add((token, value.Length) switch
+            {
+                (0x42, >= 2) => new ProductId((ushort)((value[0] << 8) | value[1])),
+                (0x43, >= 1) => new Color(value[0]),
+                (0x44, >= 1) => new Battery(value[0] & 0x7F, (value[0] & 0x80) != 0),
+                (0x46, >= 1) => new AudioChannel(value[0]),
+                (0x47, >= 1) => new AudioSourceConnected(value[0] != 0),
+                (0x4D, >= 1) => new Firmware(FirmwareVersion.Format(value)),
+                _ => new Other(token, value),
+            });
         }
-        return (token, value.Length) switch
-        {
-            (0x42, >= 2) => new ProductId((ushort)((value[0] << 8) | value[1])),
-            (0x43, >= 1) => new Color(value[0]),
-            (0x44, >= 1) => new Battery(value[0] & 0x7F, (value[0] & 0x80) != 0),
-            (0x46, >= 1) => new AudioChannel(value[0]),
-            (0x47, >= 1) => new AudioSourceConnected(value[0] != 0),
-            (0x4D, >= 1) => new Firmware(FirmwareVersion.Format(value)),
-            _ => new Other(token, value),
-        };
+        return tokens;
     }
 }
 

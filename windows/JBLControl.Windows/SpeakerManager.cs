@@ -905,13 +905,16 @@ public sealed class SpeakerManager : ObservableObject, IAsyncDisposable
         switch ((Command)frame.CommandByte)
         {
             case Command.Info:
-                switch (InfoToken.Parse(frame.Payload))
+                foreach (var token in InfoToken.ParseAll(frame.Payload))
                 {
-                    case InfoToken.Name n: Name = n.Value; break;
-                    case InfoToken.ProductId p: SetProductId(p.Value); break;
-                    case InfoToken.Color c: ColorCode = c.Value; break;
-                    case InfoToken.Battery b: BatteryChanged(b.Level, b.Charging); break;
-                    case InfoToken.Firmware f: Firmware = f.Value; break;
+                    switch (token)
+                    {
+                        case InfoToken.Name n: Name = n.Value; break;
+                        case InfoToken.ProductId p: SetProductId(p.Value); break;
+                        case InfoToken.Color c: ColorCode = c.Value; break;
+                        case InfoToken.Battery b: BatteryChanged(b.Level, b.Charging); break;
+                        case InfoToken.Firmware f: Firmware = f.Value; break;
+                    }
                 }
                 break;
             case Command.Version:

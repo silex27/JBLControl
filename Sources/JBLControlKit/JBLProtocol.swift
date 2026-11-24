@@ -95,7 +95,7 @@ public struct FrameDecoder: Sendable {
 
 // MARK: - Speaker info (0x12 tokens)
 
-/// One `0x12` notification carries one token: `00 | token | value`.
+/// A `0x12` notification carries one token, `00 | token | value`, or on older speakers several in a row.
 /// Tokens with the high bit set carry a length-prefixed UTF-8 string.
 public enum InfoToken: Equatable, Sendable {
     case name(String)
@@ -110,27 +110,52 @@ public enum InfoToken: Equatable, Sendable {
     case other(token: UInt8, value: [UInt8])
 
     public static func parse(_ payload: [UInt8]) -> InfoToken? {
-        guard payload.count >= 2 else { return nil }
-        let token = payload[1]
-        var value = Array(payload.dropFirst(2))
-        if token & 0x80 != 0, let length = value.first {
-            value = Array(value.dropFirst().prefix(Int(length)))
-            let text = String(decoding: value, as: UTF8.self)
-            switch token {
-            case 0xC1: return .name(text)
-            case 0xC2: return .serial(text)
-            default: return .other(token: token, value: value)
+        parseAll(payload).first
+    }
+
+    /// Widths of fixed-size tokens, needed to walk packed payloads (Charge 4).
+    private static func fixedWidth(_ token: UInt8) -> Int? {
+        switch token {
+        case 0x42: return 2
+        case 0x43, 0x44, 0x46, 0x47: return 1
+        case 0x48: return 6 // the speaker's MAC address
+        default: return nil
+        }
+    }
+
+    /// A token of unknown width takes the rest of the payload, so single-token frames parse as before.
+    public static func parseAll(_ payload: [UInt8]) -> [InfoToken] {
+        var tokens: [InfoToken] = []
+        var i = 1
+        while i < payload.count {
+            let token = payload[i]
+            i += 1
+            let rest = Array(payload[i...])
+            if token & 0x80 != 0, let length = rest.first {
+                let value = Array(rest.dropFirst().prefix(Int(length)))
+                i += 1 + value.count
+                let text = String(decoding: value, as: UTF8.self)
+                switch token {
+                case 0xC1: tokens.append(.name(text))
+                case 0xC2: tokens.append(.serial(text))
+                default: tokens.append(.other(token: token, value: value))
+                }
+                continue
+            }
+            let width = fixedWidth(token).flatMap { rest.count > $0 ? $0 : nil } ?? rest.count
+            let value = Array(rest.prefix(width))
+            i += width
+            switch (token, value.count) {
+            case (0x42, 2...): tokens.append(.productID(UInt16(value[0]) << 8 | UInt16(value[1])))
+            case (0x43, 1...): tokens.append(.color(value[0]))
+            case (0x44, 1...): tokens.append(.battery(level: Int(value[0] & 0x7F), charging: value[0] & 0x80 != 0))
+            case (0x46, 1...): tokens.append(.audioChannel(value[0]))
+            case (0x47, 1...): tokens.append(.audioSourceConnected(value[0] != 0))
+            case (0x4D, 1...): tokens.append(.firmware(FirmwareVersion.format(value)))
+            default: tokens.append(.other(token: token, value: value))
             }
         }
-        switch (token, value.count) {
-        case (0x42, 2...): return .productID(UInt16(value[0]) << 8 | UInt16(value[1]))
-        case (0x43, 1...): return .color(value[0])
-        case (0x44, 1...): return .battery(level: Int(value[0] & 0x7F), charging: value[0] & 0x80 != 0)
-        case (0x46, 1...): return .audioChannel(value[0])
-        case (0x47, 1...): return .audioSourceConnected(value[0] != 0)
-        case (0x4D, 1...): return .firmware(FirmwareVersion.format(value))
-        default: return .other(token: token, value: value)
-        }
+        return tokens
     }
 }
 

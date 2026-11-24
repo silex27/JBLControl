@@ -333,14 +333,15 @@ final class SpeakerManager: NSObject {
         guard case .legacy(let frame) = message else { return }
         switch Command(rawValue: frame.command) {
         case .info:
-            guard let token = InfoToken.parse(frame.payload) else { return }
-            switch token {
-            case .name(let n): name = n
-            case .productID(let pid): setProductID(pid)
-            case .color(let c): colorCode = c
-            case .battery(let level, let charging): batteryChanged(level, charging: charging)
-            case .firmware(let f): firmware = f
-            default: break
+            for token in InfoToken.parseAll(frame.payload) {
+                switch token {
+                case .name(let n): name = n
+                case .productID(let pid): setProductID(pid)
+                case .color(let c): colorCode = c
+                case .battery(let level, let charging): batteryChanged(level, charging: charging)
+                case .firmware(let f): firmware = f
+                default: break
+                }
             }
         case .version:
             firmware = FirmwareVersion.format(frame.payload)
